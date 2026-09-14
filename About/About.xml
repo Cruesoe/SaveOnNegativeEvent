@@ -3,6 +3,7 @@
     <name>Save on Negative Event</name>
     <author>Cruesoe</author>
     <packageId>cruesoe.save.negative</packageId>
+    <modVersion IgnoreIfNoMatchingField="True">260914</modVersion>
     <description>Automatically save game when a negative event occurs.</description>
     <supportedVersions>
         <li>1.6</li>

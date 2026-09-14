@@ -2,20 +2,31 @@
 using RimWorld;
 using Verse;
 using System;
+using System.IO;
+using System.Text;
 using UnityEngine;
 
 namespace SaveOnNegativeEvent
 {
     public class SaveOnNegativeEventSettings : ModSettings
     {
+        public const int DefaultCooldownSeconds = 30;
+        public const int MinimumCooldownSeconds = 1;
+        public const int MaximumCooldownSeconds = 200;
+
         public bool appendEventLabel = false;
-        public int cooldownSeconds = 30;
+        public int cooldownSeconds = DefaultCooldownSeconds;
 
         public override void ExposeData()
         {
             base.ExposeData();
             Scribe_Values.Look(ref appendEventLabel, "appendEventLabel", false);
-            Scribe_Values.Look(ref cooldownSeconds, "cooldownSeconds", 30);
+            Scribe_Values.Look(ref cooldownSeconds, "cooldownSeconds", DefaultCooldownSeconds);
+
+            if (Scribe.mode == LoadSaveMode.PostLoadInit)
+            {
+                cooldownSeconds = Math.Max(MinimumCooldownSeconds, Math.Min(MaximumCooldownSeconds, cooldownSeconds));
+            }
         }
     }
 
@@ -33,12 +44,18 @@ namespace SaveOnNegativeEvent
             Listing_Standard listingStandard = new Listing_Standard();
             listingStandard.Begin(inRect);
 
-            listingStandard.CheckboxLabeled("Append event name to save file", ref settings.appendEventLabel, "If enabled, saves as 'Bad Event_Raid'. If disabled, always overwrites 'Bad Event'.");
+            listingStandard.CheckboxLabeled(
+                "SaveOnNegativeEvent.AppendEventLabel.Label".Translate(),
+                ref settings.appendEventLabel,
+                "SaveOnNegativeEvent.AppendEventLabel.Tooltip".Translate());
 
             listingStandard.Gap();
-            listingStandard.Label($"Cooldown between event saves: {settings.cooldownSeconds} seconds");
+            listingStandard.Label("SaveOnNegativeEvent.Cooldown.Label".Translate(settings.cooldownSeconds));
 
-            settings.cooldownSeconds = (int)listingStandard.Slider(settings.cooldownSeconds, 1f, 200f);
+            settings.cooldownSeconds = (int)listingStandard.Slider(
+                settings.cooldownSeconds,
+                SaveOnNegativeEventSettings.MinimumCooldownSeconds,
+                SaveOnNegativeEventSettings.MaximumCooldownSeconds);
 
             listingStandard.End();
             base.DoSettingsWindowContents(inRect);
@@ -46,7 +63,7 @@ namespace SaveOnNegativeEvent
 
         public override string SettingsCategory()
         {
-            return "Save on Negative Event";
+            return "SaveOnNegativeEvent.SettingsCategory".Translate();
         }
     }
 
@@ -55,51 +72,93 @@ namespace SaveOnNegativeEvent
     {
         static Patcher()
         {
-            var harmony = new Harmony("com.yourname.saveonnegativeevent");
+            var harmony = new Harmony("cruesoe.save.negative");
             harmony.PatchAll();
-        }
-    }
-
-    // NEW PATCH: Triggers the moment the loading screen finishes
-    [HarmonyPatch(typeof(Game), "FinalizeInit")]
-    public static class Game_FinalizeInit_Patch
-    {
-        [HarmonyPostfix]
-        public static void Postfix()
-        {
-            // Forces the mod into cooldown so it ignores existing letters on load
-            ReceiveLetter_Patch.lastSaveTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         }
     }
 
     [HarmonyPatch(typeof(LetterStack), "ReceiveLetter", new Type[] { typeof(Letter), typeof(string), typeof(int), typeof(bool) })]
     public static class ReceiveLetter_Patch
     {
-        // CHANGED: Made internal so the loading patch above can access and reset it
-        internal static long lastSaveTime = 0;
+        private const string BaseSaveName = "Bad Event";
+        private const int MaximumEventLabelLength = 80;
+        private static readonly char[] InvalidFileNameCharacters = Path.GetInvalidFileNameChars();
+        private static float lastSaveTime = float.NegativeInfinity;
 
         [HarmonyPostfix]
         public static void Postfix(Letter let)
         {
-            if (let.def == LetterDefOf.ThreatBig || let.def == LetterDefOf.NegativeEvent)
+            if (Current.ProgramState != ProgramState.Playing ||
+                (let.def != LetterDefOf.ThreatBig && let.def != LetterDefOf.NegativeEvent))
             {
-                long currentTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                return;
+            }
 
-                if (currentTime - lastSaveTime < SaveOnNegativeEventMod.settings.cooldownSeconds) return;
+            SaveOnNegativeEventSettings settings = SaveOnNegativeEventMod.settings;
+            float currentTime = Time.realtimeSinceStartup;
+            if (settings == null || currentTime - lastSaveTime < settings.cooldownSeconds)
+            {
+                return;
+            }
 
+            string fileName = BuildSaveName(let, settings.appendEventLabel);
+
+            try
+            {
+                GameDataSaveLoader.SaveGame(fileName);
                 lastSaveTime = currentTime;
+                Messages.Message(
+                    "SaveOnNegativeEvent.SaveSucceeded".Translate(fileName),
+                    MessageTypeDefOf.SilentInput,
+                    false);
+            }
+            catch (Exception exception)
+            {
+                Log.Error($"[Save on Negative Event] Failed to save '{fileName}': {exception}");
+            }
+        }
 
-                string fileName = "Bad Event";
+        internal static string BuildSaveName(Letter letter, bool appendEventLabel)
+        {
+            if (!appendEventLabel)
+            {
+                return BaseSaveName;
+            }
 
-                if (SaveOnNegativeEventMod.settings.appendEventLabel)
+            string safeLabel = SanitizeEventLabel(letter.Label.ToString());
+            return safeLabel.Length == 0 ? BaseSaveName : BaseSaveName + "_" + safeLabel;
+        }
+
+        internal static string SanitizeEventLabel(string label)
+        {
+            StringBuilder result = new StringBuilder(Math.Min(label.Length, MaximumEventLabelLength));
+            bool previousCharacterWasReplacement = false;
+
+            foreach (char character in label)
+            {
+                bool replaceCharacter = Array.IndexOf(InvalidFileNameCharacters, character) >= 0;
+                if (replaceCharacter)
                 {
-                    string safeLabel = string.Join("_", let.Label.ToString().Split(System.IO.Path.GetInvalidFileNameChars()));
-                    fileName += "_" + safeLabel;
+                    if (!previousCharacterWasReplacement && result.Length > 0)
+                    {
+                        result.Append('_');
+                    }
+
+                    previousCharacterWasReplacement = true;
+                }
+                else
+                {
+                    result.Append(character);
+                    previousCharacterWasReplacement = false;
                 }
 
-                GameDataSaveLoader.SaveGame(fileName);
-                Messages.Message("Game Saved: " + fileName, MessageTypeDefOf.SilentInput, false);
+                if (result.Length >= MaximumEventLabelLength)
+                {
+                    break;
+                }
             }
+
+            return result.ToString().Trim(' ', '.', '_');
         }
     }
 }

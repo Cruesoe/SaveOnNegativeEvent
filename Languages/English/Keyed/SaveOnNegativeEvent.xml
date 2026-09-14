@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <SaveOnNegativeEvent.SettingsCategory>Save on Negative Event</SaveOnNegativeEvent.SettingsCategory>
+  <SaveOnNegativeEvent.AppendEventLabel.Label>Append event name to save file</SaveOnNegativeEvent.AppendEventLabel.Label>
+  <SaveOnNegativeEvent.AppendEventLabel.Tooltip>If enabled, saves as "Bad Event_Raid". If disabled, always overwrites "Bad Event".</SaveOnNegativeEvent.AppendEventLabel.Tooltip>
+  <SaveOnNegativeEvent.Cooldown.Label>Cooldown between event saves: {0} seconds</SaveOnNegativeEvent.Cooldown.Label>
+  <SaveOnNegativeEvent.SaveSucceeded>Game saved: {0}</SaveOnNegativeEvent.SaveSucceeded>
+</LanguageData>
