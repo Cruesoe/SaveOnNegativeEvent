@@ -5,4 +5,5 @@
   <SaveOnNegativeEvent.AppendEventLabel.Tooltip>If enabled, saves as "Bad Event_Raid". If disabled, always overwrites "Bad Event".</SaveOnNegativeEvent.AppendEventLabel.Tooltip>
   <SaveOnNegativeEvent.Cooldown.Label>Cooldown between event saves: {0} seconds</SaveOnNegativeEvent.Cooldown.Label>
   <SaveOnNegativeEvent.SaveSucceeded>Game saved: {0}</SaveOnNegativeEvent.SaveSucceeded>
+  <SaveOnNegativeEvent.Saving>Saving after negative event</SaveOnNegativeEvent.Saving>
 </LanguageData>
