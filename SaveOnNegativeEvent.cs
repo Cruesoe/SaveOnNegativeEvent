@@ -3,6 +3,7 @@ using RimWorld;
 using Verse;
 using System;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 
@@ -74,6 +75,39 @@ namespace SaveOnNegativeEvent
         {
             var harmony = new Harmony("cruesoe.save.negative");
             harmony.PatchAll();
+            PermanentInjuryLetterSuppressor.TryPatch(harmony);
+        }
+    }
+
+    // Letter Permanent Injury sends its letter from inside damage application; ignore those letters.
+    public static class PermanentInjuryLetterSuppressor
+    {
+        private static int depth;
+
+        public static bool Active => depth > 0;
+
+        internal static void TryPatch(Harmony harmony)
+        {
+            Type type = AccessTools.TypeByName("LetterPermanentInjury.Patch");
+            if (type == null || AccessTools.Method(type, "Postfix") is not MethodInfo target)
+            {
+                return;
+            }
+
+            harmony.Patch(
+                target,
+                prefix: new HarmonyMethod(typeof(PermanentInjuryLetterSuppressor), nameof(Prefix)),
+                finalizer: new HarmonyMethod(typeof(PermanentInjuryLetterSuppressor), nameof(Finalizer)));
+        }
+
+        private static void Prefix()
+        {
+            depth++;
+        }
+
+        private static void Finalizer()
+        {
+            depth--;
         }
     }
 
@@ -89,7 +123,8 @@ namespace SaveOnNegativeEvent
         public static void Postfix(Letter let)
         {
             if (Current.ProgramState != ProgramState.Playing ||
-                (let.def != LetterDefOf.ThreatBig && let.def != LetterDefOf.NegativeEvent))
+                (let.def != LetterDefOf.ThreatBig && let.def != LetterDefOf.NegativeEvent) ||
+                PermanentInjuryLetterSuppressor.Active)
             {
                 return;
             }
@@ -102,11 +137,23 @@ namespace SaveOnNegativeEvent
             }
 
             string fileName = BuildSaveName(let, settings.appendEventLabel);
+            lastSaveTime = currentTime;
+
+            // Letters can arrive mid-tick (e.g. during damage or downing), so saving here can disturb
+            // state other code is still iterating. Queue it like the vanilla autosaver so it runs between ticks.
+            LongEventHandler.QueueLongEvent(() => DoSave(fileName), "SaveOnNegativeEvent.Saving", false, null);
+        }
+
+        private static void DoSave(string fileName)
+        {
+            if (Current.ProgramState != ProgramState.Playing)
+            {
+                return;
+            }
 
             try
             {
                 GameDataSaveLoader.SaveGame(fileName);
-                lastSaveTime = currentTime;
                 Messages.Message(
                     "SaveOnNegativeEvent.SaveSucceeded".Translate(fileName),
                     MessageTypeDefOf.SilentInput,
