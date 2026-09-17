@@ -6,3 +6,6 @@ Source/obj/
 *.pdb
 Thumbs.db
 Desktop.ini
+Directory.Build.props
+Directory.Build.targets
+*.slnx
